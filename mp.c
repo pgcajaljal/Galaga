@@ -1,193 +1,228 @@
 #include <ncurses.h>
-#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
-#define UP 0x48
-#define DOWN 0x50
-#define LEFT 0x4B
-#define RIGHT 0x4D
-#define BACKLASH "\\"
-#define FORWARDSLASH "/"
-#define UNDERSCORE "_"
-#define BAR "|"
-#define EXCLAMATION "!"
-#define V "v"
+int WINDOW_WIDTH = 52;
+int WINDOW_HEIGHT = 30;
+
+WINDOW *swarm;
+WINDOW *ship;
+
+pthread_t swarm_thread;
+pthread_t ship_thread;
+pthread_t ship_missile_thread[100];
+
+char SWARM_CH = 42;
+char SHIP_CH = 94;
+char SHIP_MS = 124;
+char BLANK = 32;
+
+#define SWARM_ROWS 5
+#define SWARM_COLS 9
+#define SHIP_ROWS 2
+#define SHIP_COLS 3
+#define SWARM_DELAY 150000
+
+int swarm_rows = 5;
+int swarm_cols = 9;
+int swarm_position = 0;
+int swarm_direction = 0;
+
+int ship_rows = 2;
+int ship_cols = 3;
+int ship_position = 0;
+
+int ch;
+int counter = 0;
+
+int swarm_data[SWARM_ROWS][SWARM_COLS] = {{0,0,0,1,1,1,0,0,0},
+                                          {0,0,1,1,1,1,1,0,0},
+                                          {1,1,1,1,1,1,1,1,1},
+                                          {0,0,0,1,1,1,0,0,0},
+                                          {0,0,0,0,1,0,0,0,0}};
+
+int ship_data[SHIP_ROWS][SHIP_COLS] = {{0,1,0},
+                                                {1,1,1}};
 
 
-#define SWARM_DELAY 120000
-#define SHIP_DELAY 150000
-#define SWARM_CHAR "*"
-#define SWARM_ROWS 75
-#define SWARM_COLS 13
-#define SHIP_ROWS 4
-#define SHIP_COLS 8
-
-int swarm[SWARM_ROWS][SWARM_COLS] = { {0,0,0,95,95,95,95,95,95,95,0,0,0}, {0,95,95,92,0,0,0,0,0,47,95,95,0}, {124,95,95,47,95,0,0,0,95,92,95,95,124}, {0,33,33,0,0,124,95,124,0,0,33,33,0},{0,0,0,0,0,0,118,0,0,0,0,0,0}};
-
-int max_x = 0, max_y = 0;
-int swarm_direction = 1;
-
-int ship[SHIP_ROWS][SHIP_COLS] = { {0,0,0,47,92,0,0,0}, {0,0,47,92,47,92,0,0}, {0,47,124,47,92,124,92}, {47,95,124,124,124,124,95,92}};
-int ship_direction_x = 0;
-
-void print_swarm(int topleft_y, int topleft_x, void *win)
-{
-    int x = topleft_x;
-    int y = topleft_y;
-    int i, j;
-
-
-    for (i = 0; i < SWARM_ROWS; i++) {
-        for (j = 0; j < SWARM_COLS; j++) {
-            //mvwprintw(win, topleft_y+i, topleft_x+j, swarm[i]);
-            /*if (swarm[i][j])
-            {
-                mvwprintw(win, topleft_y+i, topleft_x+j, SWARM_CHAR);
-            }*/
-            if(swarm[i][j] == 47) mvwprintw(win, topleft_y+i, topleft_x+j, FORWARDSLASH);
-            else if (swarm[i][j] == 92) mvwprintw(win, topleft_y+i, topleft_x+j, BACKLASH);
-            else if (swarm[i][j] == 95) mvwprintw(win, topleft_y+i, topleft_x+j, UNDERSCORE);
-            else if (swarm[i][j] == 124) mvwprintw(win, topleft_y+i, topleft_x+j, BAR);
-            else if (swarm[i][j] == 33) mvwprintw(win, topleft_y+i, topleft_x+j, EXCLAMATION);
-            else if (swarm[i][j] == 118) mvwprintw(win, topleft_y+i, topleft_x+j, V);
+int get_leftmost(){
+    int row, col;
+    int swarm_leftmost = -1;
+    for(col=0;col<SWARM_COLS;col++){
+        for(row=0;row<SWARM_ROWS;row++){
+            if(swarm_data[row][col] == 1){
+                swarm_leftmost = col;
+                break;
+            }
         }
-       // printf("\n");
+        if(swarm_leftmost != -1){
+            break;
+        }
+    }
+    return swarm_leftmost;
+}
+
+int get_rightmost(){
+    int row, col;
+    int swarm_rightmost = -1;
+    for(col=SWARM_COLS-1;col>-1;col--){
+        for(row=SWARM_ROWS-1;row>-1;row--){
+            if(swarm_data[row][col]==1){
+                swarm_rightmost = col;
+                break;
+            }
+        }
+        if(swarm_rightmost != -1){
+            break;
+        }
+    }
+    return swarm_rightmost;
+}
+
+int get_cols(){
+    int width = get_rightmost() - get_leftmost() + 1;
+    return width;
+}
+
+void swarm_create(){
+    int row, col;
+
+    swarm_cols = get_cols();
+    swarm = newwin(swarm_rows,swarm_cols,WINDOW_HEIGHT-(WINDOW_HEIGHT-1),swarm_position);
+
+    int temp;
+    for(row=0;row<SWARM_ROWS;row++){
+        for(col=get_leftmost(),temp=0;col<get_rightmost()+1;col++,temp++){
+            move(temp,row);
+            if(swarm_data[row][col]==1){
+                waddch(swarm,SWARM_CH);
+            }
+            else{
+                waddch(swarm,BLANK);
+            }
+        }
+    }
+
+    wrefresh(swarm);
+}
+
+void ship_create(){
+    int row, col;
+
+    ship = newwin(ship_rows,ship_cols,WINDOW_HEIGHT-(ship_rows+1),ship_position);
+    
+    for(row=0;row<ship_rows;row++){
+        for(col=0;col<ship_cols;col++){
+            move(col,row);
+            if(ship_data[row][col]==1){
+                waddch(ship,SHIP_CH);
+            }
+            else{
+                waddch(ship,BLANK);
+            }
+        }
+    }
+
+    wrefresh(ship);
+}
+
+void swarm_initialize(){
+    int swarm_cols = get_cols();
+    swarm_position = (WINDOW_WIDTH-swarm_cols)/2+1;
+    swarm_create();
+    
+    time_t t;
+    srand((unsigned) time(&t));
+    swarm_direction = rand() % 2;
+    if(swarm_direction == 0){
+        swarm_direction = -1;
+    }
+    else{
+        swarm_direction = 1;
     }
 }
 
-void print_ship(int topleft_x, int topleft_y, void *win)
-{
-    int x = topleft_x;
-    int y = topleft_y;
-    int i, j;
-
-    for (i = 0; i < SHIP_ROWS; i++) {
-        for (j = 0; j < SHIP_COLS; j++) {
-            //if (ship[i][j] > 0)
-            //{
-                //mvwprintw(win, topleft_y+i, topleft_x+j, FORWARDSLASH);
-                if(ship[i][j] == 47) mvwprintw(win, topleft_y+i, topleft_x+j, FORWARDSLASH);
-                else if (ship[i][j] == 92) mvwprintw(win, topleft_y+i, topleft_x+j, BACKLASH);
-                else if (ship[i][j] == 95) mvwprintw(win, topleft_y+i, topleft_x+j, UNDERSCORE);
-                else if (ship[i][j] == 124) mvwprintw(win, topleft_y+i, topleft_x+j, BAR);
-                //else mvwprintw(win, topleft_y+i, topleft_x+j, BAR);
-            //}
-        }
-        printf("\n");
-    }
+void ship_initialize(){
+    ship_position = (WINDOW_WIDTH-SHIP_COLS)/2+1;
+    ship_create();
 }
 
-void *swarm_dance(void *win)
-{
-    int swarm_x = 0, swarm_y = 0;
-    int swarm_next_x = 0;
-    int swarm_swipe_count = 0;
+void swarm_delete(){
+    wclear(swarm);
+    wrefresh(swarm);
+}
 
-    while(1) {
-        wclear(win);
-        
-        //wmove(win, y, x);
-        //wprintw(win, "X");
-        print_swarm(swarm_y, swarm_x, win);
-        wrefresh(win);
+void ship_delete(){
+    wclear(ship);
+    wrefresh(ship);
+}
 
+void *swarm_engine(void *args){
+    while(1){
+        if(ch==KEY_F(1)){
+            break;
+        }
+        if(swarm_position==1){
+            swarm_direction *= -1;
+        }
+        if((swarm_position+get_cols()+1)==WINDOW_WIDTH){
+            swarm_direction *= -1;
+        }
         usleep(SWARM_DELAY);
-
-        //clear();
-        //getmaxyx(stdscr, swarm_max_y, swarm_max_x);
-
-        
-        //refresh();
-
-        //usleep(DELAY);
-
-        swarm_next_x = swarm_x + swarm_direction;
-
-        if (swarm_next_x + SWARM_COLS >= max_x || swarm_next_x < 0) {
-            swarm_direction*= -1;
-            swarm_swipe_count++;
-        
-            if (swarm_swipe_count % 3 == 0) swarm_y++;
-        } 
-
-        else {
-            swarm_x+= swarm_direction;
-        }
-
+        swarm_delete();
+        swarm_position += swarm_direction;
+        swarm_create();
     }
-    
-}
-
-void *ship_moving(void *win)
-{
-    int ship_x = 0, ship_y = 0;
-    int ship_next_x = 0;
-    
-    while(1) {
-        wclear(win);
-        
-        //wmove(win, y, x);
-        //wprintw(win, "X");
-        print_ship(ship_x,ship_y, win);
-        wrefresh(win);
-
-        usleep(SHIP_DELAY);
-
-        ship_next_x = ship_x + ship_direction_x;
-        int input_char;
-        input_char = getc(stdin);
-        //input_char = getc(stdin);
-        //if(input_char == 0)
-        {
-            
-        }
-
-        ship_x = ship_x + ship_direction_x;
-
-        //swarm_next_x = swarm_x + swarm_direction;
-        if (ship_next_x >= max_x || ship_next_x < 0) {
-            //direction_y*= -1;
-        } else {
-            if(input_char == 'A' || input_char == 'a') ship_direction_x = -1;
-            else if (input_char == 'D' || input_char == 'd') ship_direction_x = 1;
-            else ship_direction_x = 0;
-        }
-
-        
-    }
-
-    pthread_exit(NULL);
-
-    endwin();
     pthread_exit(NULL);
 }
 
-int main(int argc, char *argv[]) 
-{
-    pthread_t thread_swarm, thread_shipcontrol;//, thread_shipmissile;
-    void *status_swarm, *status_shipcontrol;//, *status_shipmissile;
+void *ship_engine(void *args){
+    int x,y;
+    while((ch = getch())!= KEY_F(1)){
+        switch(ch){
+            case KEY_LEFT:
+                if(ship_position>1){
+                    ship_delete();
+                    ship_position -= 1;
+                    ship_create();
+                }
+                break;
+            case KEY_RIGHT:
+                if(ship_position<WINDOW_WIDTH-4){
+                    ship_delete();
+                    ship_position += 1;
+                    ship_create();
+                }
+                break;
+        }
+    }
+    pthread_exit(NULL);    
+}
 
-    WINDOW *win_swarm, *win_ship;//, *win_missile;   
+int main(void){
+    system("resize -s 30 52");
 
     initscr();
+    cbreak();
     noecho();
     curs_set(FALSE);
+    keypad(stdscr,TRUE);
 
-    getmaxyx(stdscr, max_y, max_x);
-    win_swarm = newwin(max_y, max_x, 0, 0);
-    //win_ship = newwin(max_y, max_x, 20, 2);
+    refresh();
 
-    pthread_create(&thread_swarm, NULL, swarm_dance, (void *) win_swarm);
-    //pthread_create(&thread_shipcontrol, NULL, ship_moving, (void *) win_ship); NOT WORKINGGGG
-    //pthread_create(&thread_shipmissile, NULL, direction_changer, NULL);
+    swarm_initialize();
+    ship_initialize();
 
-    //pthread_join(thread_swarm, &status_swarm);
-    //pthread_join(thread_shipcontrol, &status_shipcontrol); NOT WORKINGGGG
-    //pthread_join(thread_shipmissile, &status_shipmissile);
-    endwin();
-    pthread_exit(NULL);
+    pthread_create(&swarm_thread,NULL,swarm_engine,NULL);
+    pthread_create(&ship_thread,NULL,ship_engine,NULL);
 
-    
+    pthread_join(swarm_thread,NULL);
+    pthread_join(ship_thread,NULL);
 
     endwin();
+
+    return 0;
 }
