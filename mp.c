@@ -10,21 +10,26 @@ int WINDOW_HEIGHT = 30;
 
 WINDOW *swarm;
 WINDOW *ship;
+WINDOW *missile[5];
 
 pthread_t swarm_thread;
 pthread_t ship_thread;
-pthread_t ship_missile_thread[100];
+pthread_t missile_thread[5];
 
 char SWARM_CH = 42;
 char SHIP_CH = 94;
 char SHIP_MS = 124;
 char BLANK = 32;
+char BAR = 124;
 
 #define SWARM_ROWS 5
 #define SWARM_COLS 9
 #define SHIP_ROWS 2
 #define SHIP_COLS 3
 #define SWARM_DELAY 150000
+#define MISSILE_DELAY 100000
+
+pthread_mutex_t mx, mx1;
 
 int swarm_rows = 5;
 int swarm_cols = 9;
@@ -34,6 +39,10 @@ int swarm_direction = 0;
 int ship_rows = 2;
 int ship_cols = 3;
 int ship_position = 0;
+
+int missile_position = 0;
+int fire = 0;
+int missile_count=0, i_temp=0;
 
 int ch;
 int counter = 0;
@@ -87,6 +96,7 @@ int get_cols(){
     return width;
 }
 
+
 void swarm_create(){
     int row, col;
 
@@ -109,6 +119,8 @@ void swarm_create(){
     wrefresh(swarm);
 }
 
+
+
 void ship_create(){
     int row, col;
 
@@ -127,6 +139,12 @@ void ship_create(){
     }
 
     wrefresh(ship);
+}
+
+void missile_create(int missile_x_pos){
+    missile[missile_count] = newwin(1,1,missile_position,missile_x_pos+1);
+    waddch(missile[missile_count],BAR);
+    wrefresh(missile[missile_count]);
 }
 
 void swarm_initialize(){
@@ -150,6 +168,12 @@ void ship_initialize(){
     ship_create();
 }
 
+void missile_initialize(){
+    missile_position = (WINDOW_HEIGHT-SHIP_ROWS)-2;
+    //missile_create();
+
+}
+
 void swarm_delete(){
     wclear(swarm);
     wrefresh(swarm);
@@ -158,6 +182,11 @@ void swarm_delete(){
 void ship_delete(){
     wclear(ship);
     wrefresh(ship);
+}
+
+void missile_delete(){
+    wclear(missile[missile_count]);
+    wrefresh(missile[missile_count]);
 }
 
 void *swarm_engine(void *args){
@@ -179,6 +208,30 @@ void *swarm_engine(void *args){
     pthread_exit(NULL);
 }
 
+void *missile_engine(void *args){
+    int missile_x_pos;
+    while(1){
+        if(i_temp != missile_count){
+            //pthread_mutex_lock(&mx1);
+            missile_x_pos = ship_position;
+            while(missile_position>0){
+                usleep(MISSILE_DELAY);
+                missile_delete();
+                missile_position -= 1;
+                missile_create(missile_x_pos);
+            }
+            
+            i_temp = missile_count;
+            //fire = 0;
+            //break;
+            //pthread_mutex_unlock(&mx1);
+        }
+    }
+    //missile_delete();
+    pthread_exit(NULL);
+
+}
+
 void *ship_engine(void *args){
     int x,y;
     while((ch = getch())!= KEY_F(1)){
@@ -197,10 +250,27 @@ void *ship_engine(void *args){
                     ship_create();
                 }
                 break;
+            case ' ':
+                //fire = 1;
+                missile_initialize();
+                pthread_mutex_lock(&mx);
+
+                missile_count++;
+                pthread_mutex_unlock(&mx);
+            
         }
+        /*if(i_temp!=missile_count){
+                    printf("%d\n",missile_count);
+                    pthread_create(&missile_thread[missile_count],NULL,missile_engine,NULL);
+                    pthread_join(missile_thread[missile_count],NULL);
+                    i_temp = missile_count;
+                }*/
+        
     }
     pthread_exit(NULL);    
 }
+
+
 
 int main(void){
     system("resize -s 30 52");
@@ -215,12 +285,22 @@ int main(void){
 
     swarm_initialize();
     ship_initialize();
+    missile_initialize();
 
     pthread_create(&swarm_thread,NULL,swarm_engine,NULL);
     pthread_create(&ship_thread,NULL,ship_engine,NULL);
+    for(int i=0; i<2; i++)
+    {
+        pthread_create(&missile_thread[i],NULL,missile_engine,NULL);
+    }
+    
 
     pthread_join(swarm_thread,NULL);
     pthread_join(ship_thread,NULL);
+    for(int i=0; i<2; i++)
+    {
+        pthread_join(missile_thread[i],NULL);
+    }
 
     endwin();
 
